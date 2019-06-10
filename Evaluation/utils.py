@@ -1,6 +1,8 @@
 from enum import IntEnum
 from typing import Dict, List, Tuple, Callable
 
+THRESHOLD = 0.3
+
 class TessType(IntEnum):
     OCR_PAGE = 0
     OCR_AREA = 1

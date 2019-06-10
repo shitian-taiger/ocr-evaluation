@@ -1,6 +1,7 @@
+from editdistance import eval
 from typing import Dict, List, Tuple, Callable
 from bs4 import BeautifulSoup
-from utils import TessType, AbbyType
+from utils import TessType, AbbyType, THRESHOLD
 from collections import defaultdict
 
 class Tess:
@@ -119,7 +120,7 @@ class Abby:
             "xmin": self.l / self.page_width * 1000,
             "ymin": self.t / self.page_height * 1000,
             "xmax": self.r / self.page_width * 1000,
-            "ymax": self.b / self.page_width * 1000
+            "ymax": self.b / self.page_height * 1000
         }
 
     def get_words(self):
@@ -148,40 +149,86 @@ class Map:
         for (abby_page, tess_page) in paired:
             # Test page 1
             self.get_page_info(abby_page, tess_page)
-            break # TODO DELETE THIS
 
     def get_page_info(self, a_page: Abby, t_page: Tess):
+        assert(a_page.a_type == AbbyType.PAGE)
         print("++++++++++++++++ NEW PAGE +++++++++++++++++++++")
-        for child in t_page.children:
-            t_words = child.get_words()
-            overlapping = filter(lambda block: self.overlap(block, child), a_page.children)
-            for o in overlapping: # Get overlapping regions from abby
-                a_words = o.get_words()
-                self.pair_words(a_words, t_words)
-            # break # TODO DELETE THIS
+
+        all_paired = []
+
+        for a_child in a_page.children:
+            a_words = a_child.get_words()
+            overlapping = filter(lambda block: self.overlap(block, a_child), t_page.children) # Overlapping Tesseract blocks
+            for o in overlapping:
+                t_words = o.get_words()
+                all_paired.append(self.pair_words(a_words, t_words)) # Add Paired words within block
+
+        # Calculations for each word
+        total_words = 0
+        total_words_considered = 0
+        total_words_not_overlapping = 0
+        iou_total = 0.0
+        error_rate = 0.0
+        for paired in all_paired:
+            for a_word, t_word_stats in paired.items():
+                total_words = total_words + 1
+                t_word = t_word_stats[0]
+                iou = t_word_stats[1]
+
+                iou_total = iou_total + iou
+                if iou > THRESHOLD: # Only consider character error rate for considered words > THRESHOLD
+                    error_rate = error_rate + (eval(t_word.text, a_word.text) / len(a_word.text))
+                    total_words_considered += 1
+                    pass
+
+                    # print("Abby Word: %s" % a_word.text, end=": ")
+                    # print("Tesseract Word: %s (IOU: %s)" % (t_word.text, iou))
+                else:
+                    total_words_not_overlapping = total_words_not_overlapping + 1
+                    pass
+                    # print("IOU too low for Abby word: %s (IOU: %s)" % (a_word.text, iou))
+                    # print("IOU too low for Tesseract word: %s (IOU: %s)" % (t_word.text, iou))
+        print("TOTAL WORDS: %s" % (total_words))
+        print("AVERAGE IOU : %s" % (iou_total / total_words))
+        print("AVERAGE CHAR ERROR RATE : %s" % (error_rate / total_words_considered))
+        print("TOTAL WORDS BELOW THRESHOLDING : %s" % (total_words_not_overlapping))
 
 
     def pair_words(self, a_words: List[Abby], t_words: List[Tess]):
-        print(" ====== PAIRING ======")
-        paired = defaultdict(lambda: [])
+        paired = defaultdict(lambda: []) # Potential pairing candidates
+        # Get overlapping t_words for each a_word
+        for a_word in a_words:
+            for t_word in t_words:
+                if self.overlap(a_word, t_word):
+                    paired[a_word].append(t_word)
+
+        single_paired = defaultdict(lambda: []) # Paired highest IOU
+        for a_word, paired_t_words in paired.items():
+            overlapping_word, iou = self.filter_word(a_word, paired_t_words)
+            single_paired[a_word] = [overlapping_word, iou]
+
+        return single_paired
+
+
+    def filter_word(self, a_word: Abby, t_words: List[Tess]) -> Tess:
+        '''
+        Get word with highest IOU overlap
+        '''
+        a_word_bounds = [coord for coord in a_word.get_bounds().values()]
+
+        current_highest_IOU = 0.0
+        t_word_top: Tess = t_words[0] # Highest IOU overlap
 
         for t_word in t_words:
-            for a_word in a_words:
-                if self.overlap(a_word, t_word):
-                    paired[t_word].append(a_word)
-
-        for t_word, a_word in paired.items():
-            # print(t_word.get_bounds())
-            print(t_word.text, end=": ")
-            # print(t_word.get_bounds())
-            for word in a_word:
-                print(word.text, end=", ")
-                # print(word.get_bounds())
-            print()
+            t_word_bounds = [coord for coord in t_word.get_bounds().values()]
+            iou = self.get_IOU(a_word_bounds, t_word_bounds)
+            if iou > current_highest_IOU:
+                current_highest_IOU = iou
+                t_word_top = t_word
+        return t_word_top, current_highest_IOU
 
 
-    def get_word_IOU(self, a_word: Abby, t_word: Tess):
-        return
+
     def get_IOU(self, boxA: List, boxB: List):
 
         # determine the (x, y)-coordinates of the intersection rectangle
