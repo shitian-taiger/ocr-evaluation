@@ -154,7 +154,6 @@ class AbbyParser:
                 print("========= ROW ===========")
                 [printer(textblock) for textblock in el.children]
             elif el.a_type == AbbyType.P:
-                print(el.l, el.t, el.r, el.b)
                 [printer(line) for line in el.children]
             elif el.a_type == AbbyType.LINE:
                 [printer(word) for word in el.children]
